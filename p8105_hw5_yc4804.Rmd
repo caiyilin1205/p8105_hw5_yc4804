@@ -9,22 +9,235 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+## Problem 1
+```{r}
+set.seed(123)
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+birthday_sim<-function(n_people){
+  birthdays<-sample(1:365, size = n_people, replace=TRUE)
+  has_match<-any(duplicated(birthdays))
+  return(has_match)
+}
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
 
-```{r cars}
-summary(cars)
+n_sims<-10000
+group_sizes<- 2:50
+
+prob_shared<- sapply(group_sizes, function(n){
+  sim_results<-replicate(n_sims, birthday_sim(n))
+  mean(sim_results)
+})
+results <- data.frame(
+  group_size = group_sizes,
+  prob_shared = prob_shared
+)
+
+
+plot(
+  x = results$group_size,
+  y = results$prob_shared,
+  type = "b",                    # points connected by lines
+  xlab = "Group size (n)",
+  ylab = "Estimated P(shared birthday)",
+  main = "Birthday problem: simulation results"
+)
+
+
+
+```
+The plot shows that the probability of at least two people sharing a birthday increases quickly as group size grows. For small groups, the chance is close to zero, but it rises sharply around 20–30 people, reaching about a 50% probability near a group size of 23. By the time the group size approaches 50, the probability is above 0.7. This illustrates the birthday paradox: shared birthdays become likely much sooner than intuition might suggest.
+
+
+## Problem 2
+
+```{r}
+library(tidyverse)
+library(broom)
+
+set.seed(123)
+
+n <- 30
+sigma <- 5
+mu_vec <- 0:6
+n_sims <- 5000
+
+sim_results <-
+  expand_grid(
+    mu_true = mu_vec,
+    sim_id = 1:n_sims
+  ) |>
+  mutate(
+    x=map(mu_true, ~ rnorm(n = n, mean = .x, sd =sigma)),
+    
+    t_out = map(x, ~ tidy(t.test(.x, mu =0)))
+  ) |>
+  unnest(t_out) |>
+  transmute(
+    mu_true,
+    sim_id,
+    estimate,
+    p_value = p.value,
+    reject = p_value < 0.05
+  )
+
+power_df <-
+  sim_results |>
+  group_by(mu_true) |>
+  summarise(
+    power = mean(reject),
+    .groups = "drop"
+  )
+
+ggplot(power_df, aes(x = mu_true, y = power)) +
+  geom_point() +
+  geom_line() +
+  labs(
+    x = "True value of mu",
+    y = "Proportion of rejections (power)",
+    title = "Power of one-sample t-test vs effect size"
+  ) +
+  ylim(0, 1)
+
+
 ```
 
-## Including Plots
+As the effect size (the true value of μ) increases, the power of the one-sample t-test increases sharply. When μ is close to 0, the test rarely rejects the null, resulting in very low power. As μ moves farther from 0, the sample mean becomes more distinguishable from the null value, leading to higher rejection rates. By μ ≈ 3–4, power approaches 1, meaning the test almost always detects the effect. Overall, larger effect sizes make it much easier for the t-test to identify a true difference.
 
-You can also embed plots, for example:
+```{r}
+avg_all <-
+  sim_results |>
+  group_by(mu_true) |>
+  summarise(
+    mean_est_all = mean(estimate),
+    .groups = "drop"
+  )
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+avg_reject <-
+  sim_results |>
+  filter(reject) |>
+  group_by(mu_true) |>
+  summarise(
+    mean_est_reject = mean(estimate),
+    .groups = "drop"
+  )
+
+## Combine for plotting with two lines
+avg_df <-
+  avg_all |>
+  left_join(avg_reject, by = "mu_true") |>
+  pivot_longer(
+    cols = c(mean_est_all, mean_est_reject),
+    names_to = "which_samples",
+    values_to = "mean_est"
+  ) |>
+  mutate(
+    which_samples = recode(
+      which_samples,
+      mean_est_all    = "All samples",
+      mean_est_reject = "Samples with H0 rejected"
+    )
+  )
+
+ggplot(avg_df, aes(x = mu_true, y = mean_est,
+                   color = which_samples)) +
+  geom_point() +
+  geom_line() +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed") +
+  labs(
+    x = "True value of mu",
+    y = "Average estimate of mu-hat",
+    color = "",
+    title = "Average estimate vs true mu"
+  )
+
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+The average estimate of μ̂ across all samples lies close to the 45° line, meaning μ̂ is an unbiased estimator of the true μ. However, when looking only at samples where the null hypothesis was rejected, the average μ̂ is noticeably higher than the true μ for small effect sizes. This happens because conditioning on rejection selects only those samples with unusually large sample means—those far enough from 0 to produce small p-values. This “selection bias” inflates the average μ̂ among rejected samples. Therefore, the sample average of μ̂ in rejected tests is not approximately equal to the true μ, especially when μ is small, because we are only keeping extreme samples that led to rejection.
+
+## Problem 3
+```{r}
+library(tidyverse)
+library(broom)
+library(purrr)
+
+# Read homicide data from Washington Post GitHub
+homicides <- read_csv(
+  "homicide-data.csv"
+)
+
+# Quick description of raw data
+glimpse(homicides)
+```
+```{r}
+#Create city_state and summarize total & unsolved homicides
+
+homicides2 <-
+  homicides %>%
+  mutate(
+    city_state = str_c(city, ", ", state),
+    unsolved = disposition %in% c("Closed without arrest", "Open/No arrest")
+  ) %>%
+  group_by(city_state) %>%
+  summarise(
+    total = n(),
+    unsolved = sum(unsolved),
+    .groups = "drop"
+  )
+
+homicides2
+
+```
+
+```{r}
+# Extract Baltimore numbers
+bmore <- homicides2 %>% filter(city_state == "Baltimore, MD")
+
+# Run prop.test
+bmore_test <- prop.test(
+  x = bmore$unsolved,
+  n = bmore$total
+)
+
+# Tidy output
+bmore_tidy <- broom::tidy(bmore_test)
+
+bmore_tidy %>% 
+  select(estimate, conf.low, conf.high)
+
+```
+```{r}
+city_results <-
+  homicides2 %>%
+  mutate(
+    prop_test = map2(unsolved, total, ~ prop.test(.x, .y)),
+    tidy_out  = map(prop_test, broom::tidy)
+  ) %>%
+  unnest(tidy_out) %>%
+  select(city_state, total, unsolved,
+         estimate, conf.low, conf.high)
+
+city_results
+
+```
+```{r}
+
+city_results_clean <- city_results %>%
+  filter(city_state != "PA, 40.461945") #This city state does not make sense to me.
+
+city_results_clean %>%
+  mutate(city_state = fct_reorder(city_state, estimate)) %>%
+  ggplot(aes(x = city_state, y = estimate)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.15) +
+  coord_flip() +
+  labs(
+    x = "",
+    y = "Estimated proportion unsolved",
+    title = "Proportion of Unsolved Homicides by City"
+  ) +
+  theme_bw()
+
+
+```
+
+The plot shows large variation across U.S. cities in the proportion of homicides that remain unsolved. Cities on the left (e.g., Richmond, VA) solve most of their cases, while cities on the right (e.g., Chicago, IL; New Orleans, LA; Baltimore, MD) have much higher unsolved proportions, often above 60–70%. Confidence intervals are wider for cities with fewer homicides, reflecting greater uncertainty. Overall, the plot highlights that homicide clearance rates differ substantially by city.
