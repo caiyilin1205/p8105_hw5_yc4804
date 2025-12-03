@@ -162,7 +162,7 @@ library(purrr)
 
 # Read homicide data from Washington Post GitHub
 homicides <- read_csv(
-  "homicide-data.csv"
+  "data/homicide-data.csv"
 )
 
 # Quick description of raw data
