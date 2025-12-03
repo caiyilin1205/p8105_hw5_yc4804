@@ -165,8 +165,6 @@ homicides <- read_csv(
   "data/homicide-data.csv"
 )
 
-# Quick description of raw data
-glimpse(homicides)
 ```
 ```{r}
 #Create city_state and summarize total & unsolved homicides
